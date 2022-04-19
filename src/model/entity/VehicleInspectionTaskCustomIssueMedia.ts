@@ -1,0 +1,25 @@
+/**
+ * @file: VehicleInspectionTaskCustomIssueMedia.ts
+ * @author: eric <developer@zhichetech.com>
+ * @copyright: (c) 2019-2020 sichuan zhichetech co., ltd.
+ */
+
+export interface VehicleInspectionTaskCustomIssueMedia {
+  id: number;
+  cid: string;
+  orgId: number;
+  storeId: number;
+  taskId: number;
+  issueId: number;
+  vin: string;
+  type: string;
+  url: string;
+  coverUrl?: string | null;
+  title?: string | null;
+  subTitle?: string | null;
+  dateRef?: string | Date | null;
+  annotationMetadata?: string | null;
+  remark?: string | null;
+  createdAt: string | Date;
+  updatedAt?: string | Date | null;
+}

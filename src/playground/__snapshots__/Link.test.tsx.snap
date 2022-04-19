@@ -1,0 +1,11 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`renders correctly 1`] = `
+<a
+  className="normal"
+  href="https://facebook.com"
+  onClick={[Function]}
+>
+  Facebook.com
+</a>
+`;

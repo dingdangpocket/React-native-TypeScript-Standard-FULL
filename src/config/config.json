@@ -1,0 +1,19 @@
+{
+  "apiEndpoint": "https://euler.gateway.dev.zhichetech.com",
+  "environment": "dev",
+  "linking": {
+    "url": "https://dev.workbench.zhichetech.com",
+    "scheme": "zhichedev"
+  },
+  "weixinOpen": {
+    "appId": "wx9013ae9aee782bfc",
+    "linking": "https://dev.workbench.zhichetech.com/wechat/"
+  },
+  "sentry": {
+    "dsn": "https://56849d8b5c924688830dc7fb37024888@sentry.zhichetech.com/2",
+    "tracesSampleRate": 1
+  },
+  "mixpanel": {
+    "token": "6c3386affba230bb5e50485869efd9f8"
+  }
+}
