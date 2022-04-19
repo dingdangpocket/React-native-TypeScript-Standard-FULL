@@ -1,8 +1,6 @@
-import { useAppNavigation } from '@euler/app/components/AppNavigationProvider';
-import { PredefinedAnnotationTags } from '@euler/app/flows/media/annotation/functions/tagPresets';
+import { useAppLoading } from '@euler/app/components/loading';
 import PreinspectionCell from '@euler/app/flows/task/components/PreinspectionCell';
 import { useTaskContext } from '@euler/app/flows/task/functions/TaskContext';
-import { mediaStagedToMediaInfo } from '@euler/app/flows/task/pages/inspection/site-inspection/SiteInspectionScreen';
 import { BottomButton } from '@euler/app/flows/task/pages/pre-inspection/components/BottomButton';
 import { DashbordImageCard } from '@euler/app/flows/task/pages/pre-inspection/components/DashbordImageCard';
 import {
@@ -18,21 +16,27 @@ import { TroubleLampInspectionModal } from '@euler/app/flows/task/pages/pre-insp
 import { useDashboardInspectionFlow } from '@euler/app/flows/task/pages/pre-inspection/functions/useDashboardInspectionFlow';
 import { useFacadeInspectionFlow } from '@euler/app/flows/task/pages/pre-inspection/functions/useFacadeInspectionFlow';
 import { useVehicleSiteArr } from '@euler/app/flows/task/pages/pre-inspection/functions/useVehicleSiteArr';
-import { TaskNavParams } from '@euler/app/flows/task/TaskFlow';
-import { AppNavParams, ReportNavParams } from '@euler/app/Routes';
+import { AppNavParams } from '@euler/app/Routes';
 import { wrapNavigatorScreen } from '@euler/functions';
 import {
-  useInventory,
-  useInventoryLookup,
-} from '@euler/functions/useInventory';
-import { AbnormalLevel } from '@euler/model/enum';
-import { isNotNull, mimeTypeFromFileUri } from '@euler/utils';
+  TaskDetail,
+  UploadedFile,
+  VehicleInspectedSiteInfo,
+} from '@euler/model';
+import { VehicleInspectionTaskCheckSiteItemMedia } from '@euler/model/entity';
+import {
+  AbnormalLevel,
+  OptionValueType,
+  SeverityLevel,
+  SiteInspectionType,
+} from '@euler/model/enum';
+import { useServiceFactory } from '@euler/services/factory';
 import { array2map } from '@euler/utils/array';
-import { useBehaviorSubject } from '@euler/utils/hooks';
 import { AntDesign, Entypo, FontAwesome } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/core';
 import { StackNavigationProp } from '@react-navigation/stack';
-import { useCallback, useMemo, useState } from 'react';
+import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ImageBackground, ScrollView, View } from 'react-native';
 
 const FailureIcon = () => {
@@ -45,64 +49,80 @@ const RightIcon = () => {
   return <AntDesign name="right" size={24} color="black" />;
 };
 
+type Props = {
+  res?: string;
+  taskNo?: string;
+  signatureUri?: string;
+  taskDetail?: TaskDetail;
+};
+
 export const PreInspectionScreen = wrapNavigatorScreen(
-  () => {
-    // const loading = useAppLoading();
-    const appNavigation = useAppNavigation();
-    const { detail, taskManager } = useTaskContext();
-
-    const [inventory] = useInventory();
-    const { getSiteById } = useInventoryLookup(inventory);
-
-    // const [siteId, setSiteId] = useState<number>(0);
-    // const [siteName, setSiteName] = useState<string | undefined>('');
-    // const [siteItemId, setSiteItemId] = useState<number>(0);
-
-    const [isVisible, setIsVisible] = useState<boolean>(false);
-
+  (props: Props) => {
+    const loading = useAppLoading();
+    const { res, signatureUri } = props;
+    const { detail, taskNo, fetchDetail } = useTaskContext();
+    const { taskService, mediaFileService } = useServiceFactory();
+    const [siteId, setSiteId] = useState<number>(0);
+    const [siteName, setSiteName] = useState<string | undefined>('');
+    const [siteItemId, setSiteItemId] = useState<number>(0);
+    const [isVisible, setIsvisible] = useState<boolean>(false);
+    const [facadeMediaDataSpliter, setFacadeMediaDataSpliter] =
+      useState<boolean>(false);
+    const [troubleLampMediaDataSpliter, setTroubleLampMediaDataSpliter] =
+      useState<boolean>(false);
+    const [otherSiteMediaDataSpliter, setOtherSiteMediaDataSpliter] =
+      useState<boolean>(false);
     const { vehicleSiteArr } = useVehicleSiteArr();
-    const navigation =
-      useNavigation<
-        StackNavigationProp<AppNavParams & TaskNavParams & ReportNavParams>
-      >();
+    const navigation = useNavigation<StackNavigationProp<AppNavParams | any>>();
 
-    const [siteInspections] = useBehaviorSubject(
-      taskManager.preInspectionManager.siteInspections$,
-    );
+    useEffect(() => {
+      console.log('DetailDebug', detail);
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
-    const onSignatureTaken = useCallback(
-      (signatureUri: string) => {
-        navigation.goBack();
-        taskManager.uploadController.enqueue({
-          localFileUri: signatureUri,
-          contentType: mimeTypeFromFileUri(signatureUri),
-          type: 'image',
-          listener: async event => {
-            if (event.type === 'finished') {
-              try {
-                await taskManager.updateBasicInfo({
-                  preInspectionSignatureImgUrl: event.result.url,
-                });
-              } catch (e) {
-                alert((e as Error).message);
+    useEffect(() => {
+      if (signatureUri) {
+        void (async () => {
+          loading.show();
+          const fileUri = signatureUri;
+          const uploadRes = await mediaFileService.upload(fileUri);
+          if (uploadRes) {
+            const informationToUpdate = {
+              preInspectionSignatureImgUrl: uploadRes.url,
+            };
+            void (async () => {
+              const signatureImage = await taskService.updateTaskInformation(
+                taskNo,
+                informationToUpdate,
+              );
+              if (signatureImage) {
+                fetchDetail(true);
+                loading.hide();
               }
-            }
-          },
-        });
-      },
-      [taskManager, navigation],
-    );
+              console.log('更新签名照片结果 ', signatureImage);
+            })();
+          }
+        })();
+      }
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [props]);
+    //user Signature upload;
 
     const {
       dashboardSites,
+      inspectionResults,
       commitInspectionResult,
       isSiteInspectionResultBeingCommitted,
     } = useDashboardInspectionFlow();
-
     const lampInspectionItems = useMemo<TroubleLampItem[]>(() => {
       if (!dashboardSites) return [];
+      const inspectedSites =
+        inspectionResults.inspectedSites?.filter(
+          x => x.inspectionType === SiteInspectionType.Dashboard,
+        ) ?? [];
+      const inspectedSiteMap = array2map(inspectedSites, x => x.siteId);
       return dashboardSites.map<TroubleLampItem>(site => {
-        const inspectedResult = siteInspections.get(site.id);
+        const inspectedResult = inspectedSiteMap.get(site.id);
         const checked =
           inspectedResult != null &&
           inspectedResult?.abnormalLevel !== AbnormalLevel.Fine;
@@ -115,10 +135,29 @@ export const PreInspectionScreen = wrapNavigatorScreen(
           loading: isSiteInspectionResultBeingCommitted(site.id),
         };
       });
-    }, [dashboardSites, isSiteInspectionResultBeingCommitted, siteInspections]);
+    }, [
+      dashboardSites,
+      inspectionResults.inspectedSites,
+      isSiteInspectionResultBeingCommitted,
+    ]);
     //lampSite Computed;
 
-    const { facadeSites } = useFacadeInspectionFlow();
+    const {
+      facadeSites,
+      facadeInspectionResults,
+      updataFacadeInspectionResults,
+    } = useFacadeInspectionFlow();
+
+    useEffect(() => {
+      if (facadeSites && facadeInspectionResults) {
+        console.log(
+          '外观部位Debug',
+          facadeSites,
+          '检测结果Debug',
+          facadeInspectionResults,
+        );
+      }
+    }, [facadeSites, facadeInspectionResults]);
 
     const facadeInspectionItems = useMemo<
       FacadeInspectionItem[] | undefined
@@ -126,288 +165,294 @@ export const PreInspectionScreen = wrapNavigatorScreen(
       if (!facadeSites) {
         return;
       } else {
+        const facadeSitesFilter =
+          facadeInspectionResults?.inspectedSites?.filter(
+            x => x.inspectionType === SiteInspectionType.Facade,
+          ) ?? [];
+        const facadeSitesMap = array2map(facadeSitesFilter, x => x.siteId);
         const facadeSitesPositionMap = array2map(vehicleSiteArr, x => x.site);
-
         return facadeSites.map<FacadeInspectionItem>(site => {
-          const inspectedResult = siteInspections.get(site.id);
+          const inspectedResult = facadeSitesMap.get(site.id);
           const siteStyleOption = facadeSitesPositionMap.get(site.name);
           const position = siteStyleOption?.styles;
-          const inspectedItem = inspectedResult?.items?.[0];
+          let hasIssue = false;
+          if (inspectedResult?.inspectedSiteItems != undefined) {
+            if (inspectedResult.inspectedSiteItems[0].abnormalLevel == 50) {
+              hasIssue = true;
+            }
+          }
           return {
             siteId: site.id,
             siteName: site.name,
             itemId: site.checkItems[0].id,
-            hasIssue:
-              inspectedItem != null &&
-              inspectedItem.abnormalLevel !== AbnormalLevel.Fine,
+            hasIssue: hasIssue,
             styles: position,
           };
         });
       }
-    }, [facadeSites, siteInspections, vehicleSiteArr]);
+    }, [facadeSites, vehicleSiteArr, facadeInspectionResults]);
     //facadeSite Point Computed;
 
     const facadeImageItems = useMemo<ImageItem[] | undefined>(() => {
-      const inspectedSites = [...siteInspections.values()];
-      return inspectedSites
-        .map<ImageItem | null>(inspectedSite => {
-          const inspectedItem = inspectedSite.items[0];
-          const site = getSiteById(inspectedSite.siteId);
-          const checkItem = site?.checkItems[0];
-          if (!site || !checkItem) return null;
-
+      if (!facadeInspectionResults?.inspectedSites) {
+        return;
+      } else {
+        const facadeSiteFilter =
+          facadeInspectionResults?.inspectedSites?.filter(
+            x => x.inspectionType === SiteInspectionType.Facade,
+          ) ?? [];
+        return facadeSiteFilter.map<ImageItem>(site => {
+          let mediasArray: any = [];
+          let itemId = 0;
+          if (site.inspectedSiteItems != undefined) {
+            mediasArray = site.inspectedSiteItems[0].medias;
+            itemId = site.inspectedSiteItems[0].itemId;
+          }
           return {
-            medias: inspectedItem.medias.map(mediaStagedToMediaInfo),
-            itemId: checkItem.id,
-            currentSiteId: inspectedSite.siteId,
+            medias: mediasArray,
+            itemId: itemId,
+            currentSiteId: site.siteId,
             currentSiteName: site.name,
           };
-        })
-        .filter(isNotNull);
-    }, [getSiteById, siteInspections]);
+        });
+      }
+    }, [facadeInspectionResults?.inspectedSites]);
     //facadeSite Image Computed;
 
-    // const AbnormalLevelDefectiveOptionHead = {
-    //   inspectionType: SiteInspectionType.Facade,
-    //   abnormalLevel: AbnormalLevel.Defective,
-    //   severityLevel: SeverityLevel.Warning,
-    // };
-    // const AbnormalLevelDefectiveOption = {
-    //   name: siteName,
-    //   resultDataType: OptionValueType.String,
-    //   resultDataStringValue: '异常',
-    //   abnormalLevel: AbnormalLevel.Defective,
-    //   severityLevel: SeverityLevel.Warning,
-    //   isCustom: false,
-    // };
-    // const AbnormalLevelFineOptionHead = {
-    //   inspectionType: SiteInspectionType.Facade,
-    //   abnormalLevel: AbnormalLevel.Fine,
-    //   severityLevel: SeverityLevel.None,
-    // };
-    // const AbnormalLevelFineOption = {
-    //   resultDataType: OptionValueType.String,
-    //   resultDataStringValue: '良好',
-    //   abnormalLevel: AbnormalLevel.Fine,
-    //   severityLevel: SeverityLevel.None,
-    //   isCustom: false,
-    // };
+    const AbnormalLevelDefectiveOptionHead = {
+      inspectionType: SiteInspectionType.Facade,
+      abnormalLevel: AbnormalLevel.Defective,
+      severityLevel: SeverityLevel.Warning,
+    };
+    const AbnormalLevelDefectiveOption = {
+      name: siteName,
+      resultDataType: OptionValueType.String,
+      resultDataStringValue: '异常',
+      abnormalLevel: AbnormalLevel.Defective,
+      severityLevel: SeverityLevel.Warning,
+      isCustom: false,
+    };
+    const AbnormalLevelFineOptionHead = {
+      inspectionType: SiteInspectionType.Facade,
+      abnormalLevel: AbnormalLevel.Fine,
+      severityLevel: SeverityLevel.None,
+    };
+    const AbnormalLevelFineOption = {
+      resultDataType: OptionValueType.String,
+      resultDataStringValue: '良好',
+      abnormalLevel: AbnormalLevel.Fine,
+      severityLevel: SeverityLevel.None,
+      isCustom: false,
+    };
     //Common options;
 
-    // const singleImageCaseCommit = async (uploadRes: UploadedFile) => {
-    //   const commitRes = await taskService.commitSiteInspection(taskNo, siteId, {
-    //     ...AbnormalLevelDefectiveOptionHead,
-    //     items: [
-    //       {
-    //         itemId: siteItemId,
-    //         ...AbnormalLevelDefectiveOption,
-    //         medias: [{ type: 'image/jpeg', url: uploadRes.url }],
-    //       },
-    //     ],
-    //   });
-    //   if (commitRes) {
-    //     return commitRes;
-    //   }
-    // };
+    const singleImageCaseCommit = async (uploadRes: UploadedFile) => {
+      const commitRes = await taskService.commitSiteInspection(taskNo, siteId, {
+        ...AbnormalLevelDefectiveOptionHead,
+        items: [
+          {
+            itemId: siteItemId,
+            ...AbnormalLevelDefectiveOption,
+            medias: [{ type: 'image/jpeg', url: uploadRes.url }],
+          },
+        ],
+      });
+      if (commitRes) {
+        return commitRes;
+      }
+    };
 
-    // const commitFinish = async (commitRes: VehicleInspectedSiteInfo) => {
-    //   if (commitRes) {
-    //     fetchDetail(true);
-    //     await updataFacadeInspectionResults();
-    //     loading.hide();
-    //   }
-    // };
+    const commitFinish = async (commitRes: VehicleInspectedSiteInfo) => {
+      if (commitRes) {
+        fetchDetail(true);
+        await updataFacadeInspectionResults();
+        loading.hide();
+      }
+    };
 
-    // const useCommonCommit = async (uploadRes: UploadedFile) => {
-    //   if (uploadRes && facadeImageItems) {
-    //     const facadeSitesMediaMap = array2map(
-    //       facadeImageItems,
-    //       x => x.currentSiteId,
-    //     );
+    const useCommonCommit = async (uploadRes: UploadedFile) => {
+      if (uploadRes && facadeImageItems) {
+        const facadeSitesMediaMap = array2map(
+          facadeImageItems,
+          x => x.currentSiteId,
+        );
 
-    //     if (!facadeSitesMediaMap.get(siteId)) {
-    //       const commitRes = await singleImageCaseCommit(uploadRes);
-    //       if (commitRes) {
-    //         await commitFinish(commitRes);
-    //       }
-    //       return;
-    //     }
+        if (!facadeSitesMediaMap.get(siteId)) {
+          const commitRes = await singleImageCaseCommit(uploadRes);
+          if (commitRes) {
+            await commitFinish(commitRes);
+          }
+          return;
+        }
 
-    //     if (facadeSitesMediaMap.get(siteId)?.medias.length === 0) {
-    //       const commitRes = await singleImageCaseCommit(uploadRes);
-    //       if (commitRes) {
-    //         await commitFinish(commitRes);
-    //       }
-    //     }
+        if (facadeSitesMediaMap.get(siteId)?.medias.length === 0) {
+          const commitRes = await singleImageCaseCommit(uploadRes);
+          if (commitRes) {
+            await commitFinish(commitRes);
+          }
+        }
 
-    //     if (facadeSitesMediaMap.get(siteId)?.medias.length !== 0) {
-    //       const Media = facadeSitesMediaMap
-    //         .get(siteId)
-    //         ?.medias.map((item: VehicleInspectionTaskCheckSiteItemMedia) => {
-    //           return { type: 'image/jpeg', url: item.url };
-    //         });
-    //       Media?.push({ type: 'image/jpeg', url: uploadRes.url });
-    //       const commitRes = await taskService.commitSiteInspection(
-    //         taskNo,
-    //         siteId,
-    //         {
-    //           ...AbnormalLevelDefectiveOptionHead,
-    //           items: [
-    //             {
-    //               itemId: siteItemId,
-    //               ...AbnormalLevelDefectiveOption,
-    //               medias: Media,
-    //             },
-    //           ],
-    //         },
-    //       );
-    //       await commitFinish(commitRes);
-    //     }
-    //   }
-    // };
+        if (facadeSitesMediaMap.get(siteId)?.medias.length !== 0) {
+          const Media = facadeSitesMediaMap
+            .get(siteId)
+            ?.medias.map((item: VehicleInspectionTaskCheckSiteItemMedia) => {
+              return { type: 'image/jpeg', url: item.url };
+            });
+          Media?.push({ type: 'image/jpeg', url: uploadRes.url });
+          const commitRes = await taskService.commitSiteInspection(
+            taskNo,
+            siteId,
+            {
+              ...AbnormalLevelDefectiveOptionHead,
+              items: [
+                {
+                  itemId: siteItemId,
+                  ...AbnormalLevelDefectiveOption,
+                  medias: Media,
+                },
+              ],
+            },
+          );
+          await commitFinish(commitRes);
+        }
+      }
+    };
     //Common commit function;
 
-    /**
-     * const compressImage = await manipulateAsync(res, [], {
+    useEffect(() => {
+      if (res && facadeMediaDataSpliter) {
+        void (async () => {
+          loading.show();
+          const fileUri = res;
+          const uploadRes = await mediaFileService.upload(fileUri);
+          await useCommonCommit(uploadRes);
+          setFacadeMediaDataSpliter(false);
+        })();
+      }
+      //facadeMediaDataSpliter
+      if (res && troubleLampMediaDataSpliter) {
+        void (async () => {
+          loading.show();
+          const compressImage = await manipulateAsync(res, [], {
             compress: 0.2,
             format: SaveFormat.JPEG,
           });
-     */
-
-    const onTakeDashboardPhoto = useCallback(() => {
-      appNavigation.navigate('_camera', {
-        photoOnly: true,
-        onCaptured: result => {
-          appNavigation.goBack();
-          if (result.type !== 'photo') return;
-          taskManager.uploadController.enqueue({
-            type: 'image',
-            contentType: 'image/jpeg',
-            localFileUri: result.uri,
-            listener: async event => {
-              if (event.type === 'finished') {
-                try {
-                  await taskManager.updateBasicInfo({
-                    dashboardImgUrl: event.result.url,
-                  });
-                } catch (e) {
-                  alert((e as Error).message);
-                }
+          const fileUri = compressImage.uri;
+          const uploadRes = await mediaFileService.upload(fileUri);
+          if (uploadRes) {
+            const informationToUpdate = {
+              dashboardImgUrl: uploadRes.url,
+            };
+            void (async () => {
+              const dashbordImage = await taskService.updateTaskInformation(
+                taskNo,
+                informationToUpdate,
+              );
+              if (dashbordImage) {
+                fetchDetail(true);
+                loading.hide();
               }
-            },
-          });
-        },
+              console.log('仪表盘照片上传结果 ', dashbordImage);
+            })();
+          }
+        })();
+        setTroubleLampMediaDataSpliter(false);
+      }
+      //troubleLampMediaDataSpliter
+      if (res && otherSiteMediaDataSpliter) {
+        const fileUri = res;
+        void (async () => {
+          loading.show();
+          const uploadRes = await mediaFileService.upload(fileUri);
+          await useCommonCommit(uploadRes);
+          setOtherSiteMediaDataSpliter(false);
+        })();
+      }
+      //otherSiteMediaDataSpliter
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [res]);
+    //all camera import logic;
+
+    const onTroubleLampCamera = () => {
+      setTroubleLampMediaDataSpliter(true);
+      navigation.push('InspectionCamera', { troubleLampCamera: true });
+    };
+    const onVehiclePreInspectionCamera = (
+      currentSiteName: string | undefined,
+      currentSiteId: number,
+      currentSiteItemId: number,
+    ) => {
+      setSiteName(currentSiteName);
+      setSiteId(currentSiteId);
+      setSiteItemId(currentSiteItemId);
+      setFacadeMediaDataSpliter(true);
+      navigation.push('InspectionCamera', {
+        vehiclePreInspectionCamera: true,
       });
-    }, [appNavigation, taskManager]);
-
-    const onVehiclePreInspectionCamera = useCallback(
-      (currentSiteId: number) => {
-        const siteInspectionManager =
-          taskManager.preInspectionManager.getSiteInspectionManager(
+    };
+    const onOtherSitePreinspectionCamera = () => {
+      setSiteId(206);
+      setSiteItemId(683);
+      setSiteName('其他部位');
+      setOtherSiteMediaDataSpliter(true);
+      navigation.push('InspectionCamera', {
+        otherSitePreinspectionCamera: true,
+      });
+    };
+    const deleteVehicleSiteImage = async (
+      currentSiteId: number,
+      currentItemId: number,
+      currentSiteName: string,
+      currentMediaItem: VehicleInspectionTaskCheckSiteItemMedia,
+    ) => {
+      if (facadeImageItems) {
+        const facadeSitesMediaMap = array2map(
+          facadeImageItems,
+          x => x.currentSiteId,
+        );
+        if (facadeSitesMediaMap.get(currentSiteId)?.medias.length === 0) return;
+        if (facadeSitesMediaMap.get(currentSiteId)?.medias.length === 1) {
+          loading.show();
+          const commitRes = await taskService.commitSiteInspection(
+            taskNo,
             currentSiteId,
+            {
+              ...AbnormalLevelFineOptionHead,
+              items: [
+                {
+                  itemId: currentItemId,
+                  name: currentSiteName,
+                  ...AbnormalLevelFineOption,
+                },
+              ],
+            },
           );
-        if (!siteInspectionManager) return;
-
-        const inspectedSite = siteInspections.get(currentSiteId);
-        if (!inspectedSite || !inspectedSite.items.length) return;
-
-        appNavigation.navigate('_camera', {
-          onCaptured: result => {
-            if (result.type === 'photo') {
-              appNavigation.navigate('_imageAnnotation', {
-                imageUri: result.uri,
-                mask: result.mask,
-                tags: PredefinedAnnotationTags.preInspection,
-                onDone: results => {
-                  taskManager.uploadController.enqueue({
-                    localFileUri: results.imageUri,
-                    contentType: 'image/jpeg',
-                    type: 'image',
-                    // simulateFailure: true,
-                    parameters: {
-                      cover: true,
-                    },
-                    context: {
-                      type: 'item-inspection',
-                      siteId: currentSiteId,
-                      key: inspectedSite.items[0]._key,
-                      siteInspectionManagerId: siteInspectionManager.id,
-                      annotationMetadata: results.annotationMetadata,
-                    },
-                  });
-                  appNavigation.pop(2);
+          await commitFinish(commitRes);
+        }
+        if (facadeSitesMediaMap.get(currentSiteId)?.medias.length !== 1) {
+          const Media = facadeSitesMediaMap
+            .get(currentSiteId)
+            ?.medias.filter((item: VehicleInspectionTaskCheckSiteItemMedia) => {
+              return item != currentMediaItem;
+            });
+          const commitRes = await taskService.commitSiteInspection(
+            taskNo,
+            currentSiteId,
+            {
+              ...AbnormalLevelDefectiveOptionHead,
+              items: [
+                {
+                  itemId: currentItemId,
+                  ...AbnormalLevelDefectiveOption,
+                  medias: Media,
                 },
-              });
-            } else {
-              taskManager.uploadController.enqueue({
-                localFileUri: result.uri,
-                contentType: mimeTypeFromFileUri(result.uri),
-                type: 'video',
-                parameters: {
-                  cover: true,
-                },
-                context: {
-                  type: 'item-inspection',
-                  siteId: currentSiteId,
-                  key: inspectedSite.items[0]._key,
-                  siteInspectionManagerId: siteInspectionManager.id,
-                },
-              });
-              appNavigation.pop();
-            }
-          },
-        });
-      },
-      [
-        appNavigation,
-        siteInspections,
-        taskManager.preInspectionManager,
-        taskManager.uploadController,
-      ],
-    );
-
-    const onOtherSitePreinspectionCamera = useCallback(() => {}, []);
-
-    // const deleteVehicleSiteImage = async (
-    //   currentSiteId: number,
-    //   currentItemId: number,
-    //   currentMediaItem: MediaInfo,
-    // ) => {
-    //   if (facadeImageItems) {
-    //     const facadeSitesMediaMap = array2map(
-    //       facadeImageItems,
-    //       x => x.currentSiteId,
-    //     );
-    //     if (facadeSitesMediaMap.get(currentSiteId)?.medias.length === 0) return;
-    //     if (facadeSitesMediaMap.get(currentSiteId)?.medias.length === 1) {
-    //       loading.show();
-
-    //       await commitFinish(commitRes);
-    //     }
-    //     if (facadeSitesMediaMap.get(currentSiteId)?.medias.length !== 1) {
-    //       const Media = facadeSitesMediaMap
-    //         .get(currentSiteId)
-    //         ?.medias.filter((item: VehicleInspectionTaskCheckSiteItemMedia) => {
-    //           return item != currentMediaItem;
-    //         });
-    //       const commitRes = await taskService.commitSiteInspection(
-    //         taskNo,
-    //         currentSiteId,
-    //         {
-    //           ...AbnormalLevelDefectiveOptionHead,
-    //           items: [
-    //             {
-    //               itemId: currentItemId,
-    //               ...AbnormalLevelDefectiveOption,
-    //               medias: Media,
-    //             },
-    //           ],
-    //         },
-    //       );
-    //       await commitFinish(commitRes);
-    //     }
-    //   }
-    // };
+              ],
+            },
+          );
+          await commitFinish(commitRes);
+        }
+      }
+    };
 
     const onLampCellPress = useCallback(
       async (item: TroubleLampItem) => {
@@ -417,10 +462,8 @@ export const PreInspectionScreen = wrapNavigatorScreen(
     );
 
     const onSignatureCardPress = useCallback(() => {
-      navigation.push('PreInspectionSignature', {
-        onDone: onSignatureTaken,
-      });
-    }, [navigation, onSignatureTaken]);
+      navigation.push('PreInspectionSignature', {});
+    }, [navigation]);
 
     const onPreview = useCallback(() => {
       navigation.push('PreinspectionReportPreview', {});
@@ -441,13 +484,13 @@ export const PreInspectionScreen = wrapNavigatorScreen(
             `}
           >
             <DashbordImageCard
-              imageRes={detail.preInspection.dashboardImgUrl}
-              onPress={onTakeDashboardPhoto}
+              imageRes={detail.dashboardImgUrl}
+              onPress={onTroubleLampCamera}
             />
             <PreinspectionCell
               leftIcon={FailureIcon}
               title={'故障灯'}
-              onPress={() => setIsVisible(!isVisible)}
+              onPress={() => setIsvisible(!isVisible)}
               isVisible={isVisible}
               value={RightIcon}
             />
@@ -482,7 +525,7 @@ export const PreInspectionScreen = wrapNavigatorScreen(
                 return (
                   <FacadeImageCard
                     key={item.currentSiteId}
-                    //onDelete={deleteVehicleSiteImage}
+                    onDelete={deleteVehicleSiteImage}
                     medias={item.medias}
                     itemId={item.itemId}
                     currentSiteId={item.currentSiteId}
@@ -498,7 +541,7 @@ export const PreInspectionScreen = wrapNavigatorScreen(
               value={'重签'}
             />
             <SignatureCard
-              imageRes={detail.preInspection.signatureImgUrl}
+              imageRes={detail.preInspectionSignatureImgUrl}
               onPress={onSignatureCardPress}
             />
           </ScrollView>
